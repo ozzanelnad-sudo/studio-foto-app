@@ -1,4 +1,4 @@
-name: Build Executable and Setup
+name: Build Executable Application
 
 on:
   push:
@@ -27,45 +27,8 @@ jobs:
       run: |
         pyinstaller --noconfirm --onedir --windowed app.py
 
-    - name: Create Inno Setup Script Automatically
-      shell: powershell
-      run: |
-        $issContent = @"
-        [Setup]
-        AppName=Studio Pas Foto Professional
-        AppVersion=1.0
-        DefaultDirName={autopf}\Studio Pas Foto
-        DefaultGroupName=Studio Pas Foto
-        OutputDir=Output
-        OutputBaseFilename=Studio_Pas_Foto_Setup_v1.0
-        Compression=lzma2/ultra64
-        SolidCompression=yes
-        ArchitecturesInstallIn64BitMode=x64
-
-        [Tasks]
-        Name: `"desktopicon`"; Description: `"{cm:CreateDesktopIcon}`"; GroupDescription: `"{cm:AdditionalIcons}`"
-
-        [Files]
-        Source: `"dist\app\*`"; DestDir: `"{app}`"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-        [Icons]
-        Name: `"{group}\Studio Pas Foto`"; Filename: `"{app}\app.exe`"
-        Name: `"{autodesktop}\Studio Pas Foto`"; Filename: `"{app}\app.exe`"; Tasks: desktopicon
-
-        [Run]
-        Filename: `"{app}\app.exe`"; Description: `"Jalankan Studio Pas Foto`"; Flags: nowait postinstall skipifsilent
-        "@
-        Set-Content -Path auto_setup.iss -Value $issContent
-
-    - name: Setup Inno Setup Compiler
-      uses: insolitus/setup-inno-setup@v1
-
-    - name: Compile Setup.exe
-      run: |
-        iscc auto_setup.iss
-
-    - name: Upload Setup.exe Artifact
+    - name: Upload Application Package
       uses: actions/upload-artifact@v4
       with:
-        name: Studio_Pas_Foto_Setup
-        path: Output/*.exe
+        name: Studio_Pas_Foto_App
+        path: dist/app/*

@@ -4,6 +4,7 @@ import numpy as np
 import customtkinter as ctk
 from PIL import Image, ImageTk
 import mediapipe as mp
+import mediapipe.python.solutions as mp_solutions
 import os
 from datetime import datetime
 
@@ -16,185 +17,190 @@ class PhotoStudioApp(ctk.CTk):
         self.title("Studio Pas Foto Professional - AI Auto Crop & Background")
         self.geometry("1100x700")
 
-        self.mp_pose = mp.solutions.pose
+        # MediaPipe Solutions
+        self.mp_pose = mp_solutions.pose
         self.pose = self.mp_pose.Pose(static_image_mode=False, min_detection_confidence=0.7)
-        self.mp_segmentation = mp.solutions.selfie_segmentation
+        self.mp_segmentation = mp_solutions.selfie_segmentation
         self.segmentation = self.mp_segmentation.SelfieSegmentation(model_selection=1)
 
-        self.SIZES = {"2x3": (330, 450), "3x4": (354, 472), "4x6": (450, 668)}
-        self.BG_COLORS = {"MERAH": (0, 0, 218), "BIRU": (218, 112, 0), "PUTIH": (255, 255, 255), "ASLI": None}
-
-        self.current_size_name = "3x4"
-        self.current_bg_name = "MERAH"
-        self.last_cropped_pas_foto = None
-
-        self.cap = cv2.VideoCapture(0)
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        # App Variables
+        self.cap = None
+        self.is_camera_open = False
+        self.current_frame = None
+        self.captured_image = None
+        self.processed_image = None
+        self.bg_color = (0, 0, 255) # Default Red (BGR)
 
         self.setup_ui()
-        self.update_video_feed()
 
     def setup_ui(self):
+        # Grid layout 1 row, 2 columns
         self.grid_columnconfigure(0, weight=3)
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        self.left_panel = ctk.CTkFrame(self)
-        self.left_panel.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
-        self.video_label = ctk.CTkLabel(self.left_panel, text="")
-        self.video_label.pack(expand=True, fill="both", padx=10, pady=10)
+        # Left Frame - Camera / Preview Area
+        self.left_frame = ctk.CTkFrame(self)
+        self.left_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
-        self.right_panel = ctk.CTkFrame(self, width=320)
-        self.right_panel.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
+        self.preview_label = ctk.CTkLabel(self.left_frame, text="Kamera Belum Aktif", font=("Arial", 16))
+        self.preview_label.pack(expand=True, fill="both", padx=10, pady=10)
 
-        ctk.CTkLabel(self.right_panel, text="KONTROL FOTO", font=("Arial", 18, "bold")).pack(pady=10)
-        self.preview_label = ctk.CTkLabel(self.right_panel, text="Preview Pas Foto", width=200, height=260)
-        self.preview_label.pack(pady=10)
+        # Right Frame - Control Panel
+        self.right_frame = ctk.CTkFrame(self)
+        self.right_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
 
-        ctk.CTkLabel(self.right_panel, text="Pilih Ukuran:", font=("Arial", 12, "bold")).pack(anchor="w", padx=20, pady=(10, 2))
-        self.size_option = ctk.CTkOptionMenu(self.right_panel, values=list(self.SIZES.keys()), command=self.change_size_event)
-        self.size_option.set("3x4")
-        self.size_option.pack(padx=20, fill="x", pady=2)
+        # Camera Controls
+        self.btn_camera = ctk.CTkButton(self.right_frame, text="Buka Kamera", command=self.toggle_camera)
+        self.btn_camera.pack(padx=20, pady=10, fill="x")
 
-        ctk.CTkLabel(self.right_panel, text="Pilih Background:", font=("Arial", 12, "bold")).pack(anchor="w", padx=20, pady=(10, 2))
-        self.bg_option = ctk.CTkOptionMenu(self.right_panel, values=list(self.BG_COLORS.keys()), command=self.change_bg_event)
-        self.bg_option.set("MERAH")
-        self.bg_option.pack(padx=20, fill="x", pady=2)
+        self.btn_capture = ctk.CTkButton(self.right_frame, text="Ambil Foto", command=self.capture_photo, state="disabled")
+        self.btn_capture.pack(padx=20, pady=10, fill="x")
 
-        self.btn_save_single = ctk.CTkButton(self.right_panel, text="Simpan Pas Foto", fg_color="#1f538d", command=self.save_single_photo)
-        self.btn_save_single.pack(padx=20, pady=(25, 5), fill="x")
+        # Background Color Selector
+        self.lbl_bg = ctk.CTkLabel(self.right_frame, text="Pilih Warna Background:", font=("Arial", 12, "bold"))
+        self.lbl_bg.pack(padx=20, pady=(20, 5), anchor="w")
 
-        self.btn_save_sheet = ctk.CTkButton(self.right_panel, text="Buat Lembaran Cetak (A4)", fg_color="#27a770", command=self.export_a4_print_sheet)
-        self.btn_save_sheet.pack(padx=20, pady=5, fill="x")
+        self.bg_option = ctk.CTkOptionMenu(
+            self.right_frame,
+            values=["Merah", "Biru", "Putih", "Polos / Transparan"],
+            command=self.change_bg_color
+        )
+        self.bg_option.pack(padx=20, pady=5, fill="x")
 
-    def update_video_feed(self):
-        ret, frame = self.cap.read()
-        if ret:
-            frame = cv2.flip(frame, 1)
-            live_preview, pas_foto = self.process_pas_foto(frame, target_size=self.SIZES[self.current_size_name], bg_color=self.BG_COLORS[self.current_bg_name])
+        # Action Buttons
+        self.btn_process = ctk.CTkButton(self.right_frame, text="Proses Pas Foto (AI)", command=self.process_pas_foto, state="disabled")
+        self.btn_process.pack(padx=20, pady=(30, 10), fill="x")
 
-            img_rgb = cv2.cvtColor(live_preview, cv2.COLOR_BGR2RGB)
-            img_pil = Image.fromarray(img_rgb)
-            img_tk = ctk.CTkImage(light_image=img_pil, dark_image=img_pil, size=(640, 480))
-            self.video_label.configure(image=img_tk)
+        self.btn_save = ctk.CTkButton(self.right_frame, text="Simpan Hasil", command=self.save_photo, state="disabled", fg_color="green", hover_color="darkgreen")
+        self.btn_save.pack(padx=20, pady=10, fill="x")
 
-            if pas_foto is not None:
-                self.last_cropped_pas_foto = pas_foto.copy()
-                pas_rgb = cv2.cvtColor(pas_foto, cv2.COLOR_BGR2RGB)
-                pas_pil = Image.fromarray(pas_rgb)
-                w, h = self.SIZES[self.current_size_name]
-                display_h = 220
-                display_w = int(w * (display_h / h))
-                pas_tk = ctk.CTkImage(light_image=pas_pil, dark_image=pas_pil, size=(display_w, display_h))
-                self.preview_label.configure(image=pas_tk, text="")
+    def toggle_camera(self):
+        if not self.is_camera_open:
+            self.cap = cv2.VideoCapture(0)
+            if not self.cap.isOpened():
+                self.preview_label.configure(text="Gagal Membuka Kamera")
+                return
+            self.is_camera_open = True
+            self.btn_camera.configure(text="Tutup Kamera")
+            self.btn_capture.configure(state="normal")
+            self.update_camera()
+        else:
+            self.is_camera_open = False
+            if self.cap:
+                self.cap.release()
+            self.btn_camera.configure(text="Buka Kamera")
+            self.btn_capture.configure(state="disabled")
+            self.preview_label.configure(text="Kamera Dimatikan", image="")
 
-        self.after(20, self.update_video_feed)
+    def update_camera(self):
+        if self.is_camera_open and self.cap:
+            ret, frame = self.cap.read()
+            if ret:
+                self.current_frame = frame.copy()
+                # Mirror view for preview
+                display_frame = cv2.flip(frame, 1)
+                rgb_image = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
+                pil_image = Image.fromarray(rgb_image)
+                
+                # Resize preview
+                w, h = self.preview_label.winfo_width(), self.preview_label.winfo_height()
+                if w > 10 and h > 10:
+                    pil_image.thumbnail((w, h))
 
-    def rotate_image(self, image, angle, center):
-        h, w = image.shape[:2]
-        M = cv2.getRotationMatrix2D(center, angle, 1.0)
-        return cv2.warpAffine(image, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+                ctk_image = ctk.CTkImage(light_image=pil_image, dark_image=pil_image, size=pil_image.size)
+                self.preview_label.configure(image=ctk_image, text="")
+            
+            self.after(15, self.update_camera)
 
-    def change_background(self, image, color_bgr):
-        if color_bgr is None:
-            return image
-        rgb_img = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        results = self.segmentation.process(rgb_img)
-        mask = results.segmentation_mask
-        bg_image = np.zeros(image.shape, dtype=np.uint8)
-        bg_image[:] = color_bgr
-        mask_3d = np.stack((mask,) * 3, axis=-1)
-        output_image = np.where(mask_3d > 0.6, image, bg_image)
-        return output_image.astype(np.uint8)
+    def capture_photo(self):
+        if self.current_frame is not None:
+            self.captured_image = self.current_frame.copy()
+            self.btn_process.configure(state="normal")
+            
+            # Show captured static frame
+            rgb_image = cv2.cvtColor(cv2.flip(self.captured_image, 1), cv2.COLOR_BGR2RGB)
+            pil_image = Image.fromarray(rgb_image)
+            w, h = self.preview_label.winfo_width(), self.preview_label.winfo_height()
+            pil_image.thumbnail((w, h))
+            ctk_image = ctk.CTkImage(light_image=pil_image, dark_image=pil_image, size=pil_image.size)
+            self.preview_label.configure(image=ctk_image, text="Foto Berhasil Diambil")
+            
+            # Auto-close camera live feed
+            self.toggle_camera()
 
-    def process_pas_foto(self, frame, target_size, bg_color):
-        h_img, w_img, _ = frame.shape
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = self.pose.process(rgb_frame)
+    def change_bg_color(self, choice):
+        if choice == "Merah":
+            self.bg_color = (0, 0, 255)
+        elif choice == "Biru":
+            self.bg_color = (255, 0, 0)
+        elif choice == "Putih":
+            self.bg_color = (255, 255, 255)
+        elif choice == "Polos / Transparan":
+            self.bg_color = None
 
-        if not results.pose_landmarks:
-            return frame, None
-
-        landmarks = results.pose_landmarks.landmark
-        l_shoulder = landmarks[self.mp_pose.PoseLandmark.LEFT_SHOULDER]
-        r_shoulder = landmarks[self.mp_pose.PoseLandmark.RIGHT_SHOULDER]
-        nose = landmarks[self.mp_pose.PoseLandmark.NOSE]
-
-        lx, ly = int(l_shoulder.x * w_img), int(l_shoulder.y * h_img)
-        rx, ry = int(r_shoulder.x * w_img), int(r_shoulder.y * h_img)
-        nx, ny = int(nose.x * w_img), int(nose.y * h_img)
-
-        dx = lx - rx
-        dy = ly - ry
-        angle_deg = math.degrees(math.atan2(dy, dx))
-        center_point = (int((lx + rx) / 2), int((ly + ry) / 2))
-        rotated_frame = self.rotate_image(frame, angle_deg, center_point)
-
-        processed_bg = self.change_background(rotated_frame, bg_color)
-
-        shoulder_width = math.sqrt(dx**2 + dy**2)
-        target_w, target_h = target_size
-        aspect_ratio = target_h / target_w
-
-        crop_w = int(shoulder_width * 1.85)
-        crop_h = int(crop_w * aspect_ratio)
-
-        center_y = int(ny + (center_point[1] - ny) * 0.45)
-        x1 = max(0, center_point[0] - crop_w // 2)
-        y1 = max(0, center_y - int(crop_h * 0.35))
-        x2 = min(w_img, x1 + crop_w)
-        y2 = min(h_img, y1 + crop_h)
-
-        cropped = processed_bg[y1:y2, x1:x2]
-        if cropped.size > 0:
-            final_pas_foto = cv2.resize(cropped, target_size, interpolation=cv2.INTER_LANCZOS4)
-            cv2.rectangle(rotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            return rotated_frame, final_pas_foto
-
-        return frame, None
-
-    def change_size_event(self, new_size):
-        self.current_size_name = new_size
-
-    def change_bg_event(self, new_bg):
-        self.current_bg_name = new_bg
-
-    def save_single_photo(self):
-        if self.last_cropped_pas_foto is not None:
-            if not os.path.exists("output"):
-                os.makedirs("output")
-            filename = f"output/pas_foto_{self.current_size_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-            cv2.imwrite(filename, self.last_cropped_pas_foto)
-
-    def export_a4_print_sheet(self):
-        if self.last_cropped_pas_foto is None:
+    def process_pas_foto(self):
+        if self.captured_image is None:
             return
-        if not os.path.exists("output"):
-            os.makedirs("output")
-        a4_w, a4_h = 2480, 3508
-        canvas = np.ones((a4_h, a4_w, 3), dtype=np.uint8) * 255
-        photo = self.last_cropped_pas_foto
-        ph, pw, _ = photo.shape
-        margin_x, margin_y = 150, 150
-        gap_x, gap_y = 40, 40
-        cols = (a4_w - 2 * margin_x) // (pw + gap_x)
-        rows = (a4_h - 2 * margin_y) // (ph + gap_y)
 
-        for r in range(rows):
-            for c in range(cols):
-                x = margin_x + c * (pw + gap_x)
-                y = margin_y + r * (ph + gap_y)
-                canvas[y:y+ph, x:x+pw] = photo
+        image = cv2.flip(self.captured_image, 1)
+        h, w, _ = image.shape
+        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-        sheet_filename = f"output/lembar_cetak_A4_{self.current_size_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-        cv2.imwrite(sheet_filename, canvas)
+        # 1. AI Selfie Segmentation
+        seg_result = self.segmentation.process(rgb_image)
+        condition = np.stack((seg_result.segmentation_mask,) * 3, axis=-1) > 0.5
 
-    def on_closing(self):
-        self.cap.release()
-        self.destroy()
+        if self.bg_color is not None:
+            bg_img = np.zeros(image.shape, dtype=np.uint8)
+            bg_img[:] = self.bg_color
+            output_image = np.where(condition, image, bg_img)
+        else:
+            output_image = image
+
+        # 2. AI Auto-Crop Pas Foto Ratio (3:4)
+        pose_result = self.pose.process(rgb_image)
+        if pose_result.pose_landmarks:
+            landmarks = pose_result.pose_landmarks.landmark
+            nose = landmarks[self.mp_pose.PoseLandmark.NOSE]
+            left_shoulder = landmarks[self.mp_pose.PoseLandmark.LEFT_SHOULDER]
+            right_shoulder = landmarks[self.mp_pose.PoseLandmark.RIGHT_SHOULDER]
+
+            # Calculate crop area based on face & shoulders
+            center_x = int(nose.x * w)
+            top_y = max(0, int((nose.y - 0.25) * h))
+            shoulder_y = int(max(left_shoulder.y, right_shoulder.y) * h)
+            bottom_y = min(h, int(shoulder_y + (shoulder_y - top_y) * 0.3))
+
+            crop_h = bottom_y - top_y
+            crop_w = int(crop_h * (3 / 4))
+
+            left_x = max(0, center_x - crop_w // 2)
+            right_x = min(w, left_x + crop_w)
+
+            if right_x - left_x > 10 and bottom_y - top_y > 10:
+                output_image = output_image[top_y:bottom_y, left_x:right_x]
+
+        self.processed_image = output_image
+        self.btn_save.configure(state="normal")
+
+        # Display result
+        display_rgb = cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB)
+        pil_image = Image.fromarray(display_rgb)
+        lbl_w, lbl_h = self.preview_label.winfo_width(), self.preview_label.winfo_height()
+        pil_image.thumbnail((lbl_w, lbl_h))
+        ctk_image = ctk.CTkImage(light_image=pil_image, dark_image=pil_image, size=pil_image.size)
+        self.preview_label.configure(image=ctk_image, text="")
+
+    def save_photo(self):
+        if self.processed_image is not None:
+            if not os.path.exists("Hasil_Pas_Foto"):
+                os.makedirs("Hasil_Pas_Foto")
+            
+            filename = f"Hasil_Pas_Foto/PasFoto_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            cv2.imwrite(filename, self.processed_image)
+            self.preview_label.configure(text=f"Foto Berhasil Disimpan di:\n{os.path.abspath(filename)}")
 
 if __name__ == "__main__":
     app = PhotoStudioApp()
-    app.protocol("WM_DELETE_WINDOW", app.on_closing)
     app.mainloop()

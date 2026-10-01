@@ -4,6 +4,9 @@ import numpy as np
 import customtkinter as ctk
 from PIL import Image, ImageTk
 import mediapipe as mp
+# Impor eksplisit sub-modul solutions untuk mencegah AttributeError pada PyInstaller
+import mediapipe.python.solutions.pose as mp_pose_module
+import mediapipe.python.solutions.selfie_segmentation as mp_seg_module
 import os
 import sys
 from datetime import datetime
@@ -19,15 +22,15 @@ class PhotoStudioApp(ctk.CTk):
         self.geometry("1100x700")
         self.minsize(900, 600)
 
-        # Inisialisasi MediaPipe Solutions dengan aman
-        self.mp_pose = mp.solutions.pose
+        # Inisialisasi MediaPipe Solutions langsung dari sub-modul yang terimpor
+        self.mp_pose = mp_pose_module
         self.pose = self.mp_pose.Pose(
             static_image_mode=True, 
             model_complexity=1, 
             min_detection_confidence=0.5
         )
         
-        self.mp_segmentation = mp.solutions.selfie_segmentation
+        self.mp_segmentation = mp_seg_module
         self.segmentation = self.mp_segmentation.SelfieSegmentation(model_selection=0)
 
         # Variabel Aplikasi
@@ -95,9 +98,9 @@ class PhotoStudioApp(ctk.CTk):
 
     def toggle_camera(self):
         if not self.is_camera_open:
-            self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW) # CAP_DSHOW untuk performa optimal di Windows
+            self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
             if not self.cap.isOpened():
-                self.cap = cv2.VideoCapture(0) # Fallback jika DSHOW tidak didukung
+                self.cap = cv2.VideoCapture(0)
                 
             if not self.cap.isOpened():
                 self.preview_label.configure(text="Gagal Membuka Kamera!\nPastikan Kamera Terhubung.")
@@ -121,12 +124,10 @@ class PhotoStudioApp(ctk.CTk):
             ret, frame = self.cap.read()
             if ret:
                 self.current_frame = frame.copy()
-                # Mirror preview
                 display_frame = cv2.flip(frame, 1)
                 rgb_image = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
                 pil_image = Image.fromarray(rgb_image)
                 
-                # Resizing responsive
                 w = max(100, self.preview_label.winfo_width())
                 h = max(100, self.preview_label.winfo_height())
                 pil_image.thumbnail((w, h))
@@ -141,7 +142,6 @@ class PhotoStudioApp(ctk.CTk):
             self.captured_image = self.current_frame.copy()
             self.btn_process.configure(state="normal")
             
-            # Tampilkan static preview hasil tangkapan
             rgb_image = cv2.cvtColor(cv2.flip(self.captured_image, 1), cv2.COLOR_BGR2RGB)
             pil_image = Image.fromarray(rgb_image)
             w = max(100, self.preview_label.winfo_width())
@@ -151,16 +151,15 @@ class PhotoStudioApp(ctk.CTk):
             ctk_image = ctk.CTkImage(light_image=pil_image, dark_image=pil_image, size=pil_image.size)
             self.preview_label.configure(image=ctk_image, text="Foto Berhasil Diambil!")
             
-            # Otomatis matikan live stream kamera
             self.toggle_camera()
 
     def change_bg_color(self, choice):
         if choice == "Merah":
-            self.bg_color = (0, 0, 255) # BGR Red
+            self.bg_color = (0, 0, 255)
         elif choice == "Biru":
-            self.bg_color = (255, 0, 0) # BGR Blue
+            self.bg_color = (255, 0, 0)
         elif choice == "Putih":
-            self.bg_color = (255, 255, 255) # BGR White
+            self.bg_color = (255, 255, 255)
         elif choice == "Polos / Transparan":
             self.bg_color = None
 
@@ -210,7 +209,6 @@ class PhotoStudioApp(ctk.CTk):
         self.processed_image = output_image
         self.btn_save.configure(state="normal")
 
-        # Tampilkan Hasil Akhir
         display_rgb = cv2.cvtColor(output_image, cv2.COLOR_BGR2RGB)
         pil_image = Image.fromarray(display_rgb)
         lbl_w = max(100, self.preview_label.winfo_width())

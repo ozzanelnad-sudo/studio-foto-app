@@ -25,7 +25,7 @@ jobs:
 
     - name: Build EXE with PyInstaller
       run: |
-        pyinstaller --noconfirm --onedir --windowed app.py
+        pyinstaller --noconfirm --onedir --windowed --collect-all mediapipe app.py
 
     - name: Upload Application Package
       uses: actions/upload-artifact@v4
